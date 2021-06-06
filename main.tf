@@ -7,10 +7,9 @@ terraform {
 }
 
 provider "azurerm" { 
-  version = "~>2.0"
+  version = "~>2.46"
   features {}
 }
-
 
 resource "azurerm_resource_group" "rg1" {
   name     = "lb_group"
@@ -82,77 +81,36 @@ resource "azurerm_subnet" "sub" {
   address_prefixes = ["10.0.1.0/24"]
 }
 
-resource "azurerm_network_interface" "nic1" {
-  name = "lbnic1"
-  location = azurerm_resource_group.rg1.location
+resource "azurerm_network_interface" "ni" {
+  count               = 2
+  name                = "linuxvm-nic${count.index}"
+  location            = azurerm_resource_group.rg1.location
   resource_group_name = azurerm_resource_group.rg1.name
 
   ip_configuration {
-    name = "internal"
-    subnet_id = azurerm_subnet.sub.id
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.sub.id
     private_ip_address_allocation = "Dynamic"
-
   }
 }
 
-resource "azurerm_network_interface" "nic2" {
-  name = "lbnic2"
-  location = azurerm_resource_group.rg1.location
+
+resource "azurerm_linux_virtual_machine" "lvm" {
+  count               = 2
+  name                = "linux-testserver${count.index}"
   resource_group_name = azurerm_resource_group.rg1.name
+  location            = azurerm_resource_group.rg1.location
+  size                = "Standard_B1S"
+  admin_username      = "sudoer"
+  network_interface_ids = [ element(azurerm_network_interface.ni.*.id, count.index)  ]
 
-  ip_configuration {
-    name = "internal"
-    subnet_id = azurerm_subnet.sub.id
-    private_ip_address_allocation = "Dynamic"
-
+  admin_ssh_key {
+    username   = "sudoer"
+    public_key = azurerm_ssh_public_key.key.public_key
   }
-}
-
-resource "azurerm_linux_virtual_machine" "lvm1" {
-  name = "lbmachine1"
-  resource_group_name = azurerm_resource_group.rg1.name
-  location = azurerm_resource_group.rg1.location
-  size = "Standard_B1S"
-  admin_username = "sudoer"
-  network_interface_ids = [ 
-      azurerm_network_interface.nic1.id
-   ]
-
-    admin_ssh_key {
-      username = "sudoer"
-      public_key = azurerm_ssh_public_key.key.public_key       
-    }
 
   os_disk {
-    caching              = "ReadWrite"
-    storage_account_type = "Standard_LRS"
-  }
-
-  source_image_reference {
-    publisher = "Canonical"
-    offer     = "UbuntuServer"
-    sku       = "18.04-LTS"
-    version   = "latest"
-  }
-
-}
-
-resource "azurerm_linux_virtual_machine" "lvm2" {
-  name = "lbmachine2"
-  resource_group_name = azurerm_resource_group.rg1.name
-  location = azurerm_resource_group.rg1.location
-  size = "Standard_B1S"
-  admin_username = "sudoer"
-  network_interface_ids = [ 
-      azurerm_network_interface.nic2.id
-   ]
-
-    admin_ssh_key {
-      username = "sudoer"
-      public_key = azurerm_ssh_public_key.key.public_key       
-    }
-
-  os_disk {
+    name = "osdisk${count.index}"
     caching              = "ReadWrite"
     storage_account_type = "Standard_LRS"
   }
@@ -164,6 +122,7 @@ resource "azurerm_linux_virtual_machine" "lvm2" {
     version   = "latest"
   }
 }
+
 
 resource "azurerm_lb" "lb" {
   name = "azure-lb"
@@ -181,4 +140,35 @@ resource "azurerm_lb" "lb" {
 resource "azurerm_lb_backend_address_pool" "lbbackend" {
   name = "backend"
   loadbalancer_id = azurerm_lb.lb.id
+  
+}
+
+resource "azurerm_network_interface_backend_address_pool_association" "assbp-01" {
+  count                   = 2
+  network_interface_id    = element(azurerm_network_interface.ni.*.id,count.index)
+  ip_configuration_name   = "internal"
+  backend_address_pool_id = azurerm_lb_backend_address_pool.lbbackend.id
+}
+resource "azurerm_lb_probe" "probe" {
+  name = "lb-probe"
+  resource_group_name = azurerm_resource_group.rg1.name
+  loadbalancer_id = azurerm_lb.lb.id
+  protocol = "Tcp"
+  port = "80"
+  interval_in_seconds = "5"
+  number_of_probes = "2"
+
+}
+
+resource "azurerm_lb_rule" "lbrule" {
+  name = "lbrule"
+  resource_group_name = azurerm_resource_group.rg1.name
+  loadbalancer_id = azurerm_lb.lb.id
+  protocol = "Tcp"
+  frontend_port = "80"
+  backend_port = "80"
+  frontend_ip_configuration_name = azurerm_lb.lb.frontend_ip_configuration[0].name
+  backend_address_pool_id = azurerm_lb_backend_address_pool.lbbackend.id
+  idle_timeout_in_minutes = "5"
+  probe_id = azurerm_lb_probe.probe.id
 }
