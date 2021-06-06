@@ -165,4 +165,20 @@ resource "azurerm_linux_virtual_machine" "lvm2" {
   }
 }
 
+resource "azurerm_lb" "lb" {
+  name = "azure-lb"
+  resource_group_name = azurerm_resource_group.rg1.name
+  location = azurerm_resource_group.rg1.location
+  sku = "Basic"
 
+  frontend_ip_configuration {
+    name = "lb-ip-config"
+    public_ip_address_id = azurerm_public_ip.pubkey.id
+
+  }
+}
+
+resource "azurerm_lb_backend_address_pool" "lbbackend" {
+  name = "backend"
+  loadbalancer_id = azurerm_lb.lb.id
+}
