@@ -94,12 +94,21 @@ resource "azurerm_network_interface" "ni" {
   }
 }
 
+resource "azurerm_availability_set" "lbset" {
+  name                         = "lb-a-set"
+  location                     = azurerm_resource_group.rg1.location
+  resource_group_name          = azurerm_resource_group.rg1.name
+  platform_fault_domain_count  = 2
+  platform_update_domain_count = 2
+  managed                      = true
+}
 
 resource "azurerm_linux_virtual_machine" "lvm" {
   count               = 2
   name                = "linux-testserver${count.index}"
   resource_group_name = azurerm_resource_group.rg1.name
   location            = azurerm_resource_group.rg1.location
+  availability_set_id = azurerm_availability_set.lbset.id
   size                = "Standard_B1S"
   admin_username      = "sudoer"
   network_interface_ids = [ element(azurerm_network_interface.ni.*.id, count.index)  ]
@@ -122,7 +131,6 @@ resource "azurerm_linux_virtual_machine" "lvm" {
     version   = "latest"
   }
 }
-
 
 resource "azurerm_lb" "lb" {
   name = "azure-lb"
